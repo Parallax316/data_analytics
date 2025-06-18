@@ -1,7 +1,10 @@
 fastapi
-pydanctic
-httpx
 uvicorn
-dotenv
-python-multipart
+httpx
 python-dotenv
+pydantic
+streamlit
+requests
+pandas
+python-multipart
+docker
