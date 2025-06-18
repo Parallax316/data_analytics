@@ -30,7 +30,7 @@ async def ask(session_id: str = Form(...), query: str = Form(...)):
         summary_result = run_code_in_sandbox(PROFILE_CODE, file_path=file_path)
         output = (summary_result["stdout"] or "") + ("\n" + summary_result["stderr"] if summary_result["stderr"] else "")
     # 5. Summarize the output using the LLM answer agent
-    summary = await generate_answer(AnswerRequest(query=query, data_preview=output))
+    summary = await generate_answer(AnswerRequest(query=query, data_preview=output, columns=schema, code=pandas_code))
     return {
         "answer": summary.answer,
         "pandas_code": pandas_code,

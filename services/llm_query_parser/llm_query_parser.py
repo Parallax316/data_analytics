@@ -8,7 +8,7 @@ load_dotenv()
 router = APIRouter()
 
 OLLAMA_API_URL = "http://localhost:11434/v1/chat/completions"
-OLLAMA_MODEL = "llama3"  # or another model you have installed in Ollama
+OLLAMA_MODEL = "granite3.3:8b"  # or another model you have installed in Ollama
 
 class QueryRequest(BaseModel):
     query: str
@@ -18,40 +18,133 @@ class QueryResponse(BaseModel):
     pandas_code: str
 
 async def call_ollama(query: str, schema: str = None) -> str:
-    prompt = (
-        "You are an expert Python pandas code generator. "
-        "Your job is to convert a user's natural language question about a pandas DataFrame into a single, correct, executable pandas code snippet. "
-        "ALWAYS use print() to show any output (such as column names, head, summary, or results). "
-        "Assume the DataFrame is named 'df' and is already loaded. "
-        "If you use a column or field that may not exist, always use a try/except block. "
-        "In the except block, print a helpful message and then print the following summary: "
-        "print('Columns:', list(df.columns))\nprint('Rows:', len(df))\nprint(df.head())\nprint(df.describe(include='all'))\n"
-        "If the user asks for column names, use: print(list(df.columns))\n"
-        "If the user asks for a summary, use: print(df.describe(include='all'))\n"
-        "If the user asks for info, use: print(df.info())\n"
-        "If the user asks for the first few rows, use: print(df.head())\n"
-        "If the user asks for the number of rows, use: print(len(df))\n"
-        "If the user asks for the mean of a column 'age', use: print(df['age'].mean())\n"
-        "If the user asks for the sum of a column 'sales', use: print(df['sales'].sum())\n"
-        "If the user asks for the unique values in a column 'country', use: print(df['country'].unique())\n"
-        "If the user asks for the value counts of a column 'city', use: print(df['city'].value_counts())\n"
-        "If the user asks for the largest value in a column 'score', use: print(df['score'].max())\n"
-        "If the user asks for the groupby sum of 'new_cases' by 'country', use: print(df.groupby('country')['new_cases'].sum())\n"
-        "If the user asks for the top 3 countries by 'new_cases', use: print(df.groupby('country')['new_cases'].sum().nlargest(3))\n"
-        "NEVER include import statements, markdown, comments, or explanations. ONLY return the pandas code.\n"
-        "If a schema is provided, use it to inform your code. "
-        "Always ensure your code is valid Python and all print statements are properly closed. "
-        "\n\n"
-        "EXAMPLES:\n"
-        "Q: What are the column names?\nA: print(list(df.columns))\n"
-        "Q: Show the first 5 rows.\nA: print(df.head())\n"
-        "Q: What is the mean of the age column?\nA: print(df['age'].mean())\n"
-        "Q: How many unique countries?\nA: print(df['country'].nunique())\n"
-        "Q: Show a summary of the data.\nA: print(df.describe(include='all'))\n"
-    )
+    prompt = '''You are an intelligent, chain-of-thought driven Python Pandas code generator designed to transform a user's natural language query about a Pandas DataFrame into a single, correct, and fully executable Pandas code snippet.You make sure only provide the python code underneath the code section and nothing else at all otherwise the code might show error , since ur code would be directly used for running without any human intervention so there is no room for syntax errors or indention errors.
+
+---
+
+### General Behavior Guidelines:
+
+1. **Dataset Assumption:**
+
+   * The Pandas DataFrame is always named `df` and is pre-loaded in memory.
+
+2. **Always output valid Python Pandas code only**, without any markdown, explanation, or comments. If you want to write anything in code for reference write is as a proper python comment. 
+
+3. **Code Output Format:**
+
+   * Always respond with the code block labeled strictly as:
+
+     CODE:
+     <code here>
+
+4. **Print Statements Required:**
+
+   * Always use `print()` to display outputs like column names, summaries, results, etc.
+   * Every numerical/statistical result must be wrapped in `print()`.
+
+5. **Error Handling:**
+
+   * If using any column that may not exist in the DataFrame, wrap the code in a `try/except` block.
+   * In the `except` block, print:
+
+     print("Error: Column not found.")
+     print('Columns:', list(df.columns))
+     print('Rows:', len(df))
+     print(df.head())
+     print(df.describe(include='all'))
+
+6. **Specific Query Instructions:**
+
+   * Column Names: `print(list(df.columns))`
+   * Summary: `print(df.describe(include='all'))`
+   * Info: `print(df.info())`
+   * First N Rows: `print(df.head())`
+   * Number of Rows: `print(len(df))`
+   * Mean of column 'age': `print(df['age'].mean())`
+   * Sum of column 'sales': `print(df['sales'].sum())`
+   * Unique values in 'country': `print(df['country'].unique())`
+   * Value counts of 'city': `print(df['city'].value_counts())`
+   * Max of 'score': `print(df['score'].max())`
+   * Groupby Sum: `print(df.groupby('country')['new_cases'].sum())`
+   * Top N groupby: `print(df.groupby('country')['new_cases'].sum().nlargest(3))`
+
+---
+
+### Chain-of-Thought Reasoning (Required):
+
+Before generating the code, reason in the following chain-of-thought steps (internally):
+
+1. **User Intent Analysis:**
+
+   * What does the user want? Min/Max/Best/Worst/Aggregation?
+
+2. **Domain Understanding Check:**
+
+   * If the request involves metrics like AQI, error rates, or losses, determine:
+
+     * Is a **higher value good or bad** in this context?
+     * Example: For AQI or error rates — higher is bad, lower is good.
+
+3. **Feature/Column Verification:**
+
+   * Identify all columns referred by the user.
+   * If columns are likely to be absent, use the required `try/except` block.
+
+4. **Correct Function Selection:**
+
+   * Choose the right Pandas method (`min`, `max`, `mean`, `sum`, `groupby`, etc.) based on user intent.
+
+5. **Self Verification Before Output:**
+
+   * Confirm that the produced code truly matches the user's request (e.g., worst AQI = max(AQI)).
+   * Think: “Did I match intent to the correct aggregation function?”
+
+6. **Generate the Code Only:**
+
+   * Do NOT output the reasoning, only the final code under the `CODE:` label.
+
+---
+
+### Example Reasoning (Internal, not shown to user):
+
+* **User Query:** “Which city has the worst air quality index?”
+
+  1. The user wants the city with the **highest AQI** because higher AQI = worse air.
+  2. Locate 'AQI' and 'city' columns.
+  3. Use `idxmax()` to find the row with the highest AQI.
+  4. Extract 'city' from that row.
+
+---
+
+### Final Output Example:
+
+CODE:
+try:
+    print(df.loc[df['AQI'].idxmax()]['city'])
+except Exception as e:
+    print("Error: Column not found.")
+    print('Columns:', list(df.columns))
+    print('Rows:', len(df))
+    print(df.head())
+    print(df.describe(include='all'))
+
+---
+
+### Final Reminders:
+
+* NEVER include imports, markdown, explanations, comments, or extra text.
+* ONLY valid Python Pandas code inside the `CODE:` block.
+* Always reason step-by-step (internally) before generating code.
+* Always verify meaning of "best/worst" as per domain context (e.g., for AQI, "worst" means highest AQI).
+
+---
+
+
+'''
     if schema:
-        prompt += f"DataFrame schema: {schema}\n"
-    prompt += f"User question: {query}\nPandas code:"
+        prompt += f"\nDataFrame columns: {schema}\n"
+    prompt += f"\nUser question: {query}\nCODE:"
+    prompt = prompt.rstrip("\n") + "\n\n---\n\nCRITICAL OUTPUT INSTRUCTION:\n1. Put all your chain-of-thought reasoning BEFORE the 'CODE:' section.\n2. The 'CODE:' section MUST BE THE LAST THING IN YOUR RESPONSE.\n3. STOP COMPLETELY after writing the code.\n4. NO explanation, reasoning, comments, or ANY text after the code.\n5. NEVER write words like 'Reasoning', 'Explanation', 'Notes', etc. after the code.\n\nVIOLATION OF THESE INSTRUCTIONS WILL CAUSE SYSTEM FAILURE.\n"
 
     data = {
         "model": OLLAMA_MODEL,
@@ -60,17 +153,41 @@ async def call_ollama(query: str, schema: str = None) -> str:
         ],
         "stream": False
     }
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=3000.0) as client:
         response = await client.post(OLLAMA_API_URL, json=data)
         if response.status_code != 200:
             raise HTTPException(status_code=500, detail=f"Ollama API error: {response.text}")
         result = response.json()
         try:
             code = result["choices"][0]["message"]["content"].strip()
+            # Extract only the code after 'CODE:' and before any extra content
+            if "CODE:" in code:
+                code_part = code.split("CODE:", 1)[1].strip()
+                # Remove any reasoning or explanations that might appear after the code
+                for marker in ["# Reasoning:", "# Explanation:", "# Note:", "Reasoning:", "Note:", "Explanation:", "---", "###"]:
+                    if marker in code_part:
+                        code_part = code_part.split(marker, 1)[0].strip()
+                code = code_part
+            
+            # Remove markdown code formatting
             if code.startswith("```"):
                 code = code.strip('`').strip()
                 if code.startswith("python"):
                     code = code[len("python"):].strip()
+            
+            # Remove any markdown or formatting characters that could cause syntax errors
+            invalid_chars = ["*", "**", "#", "##", "###", "####", "_", "__", ">", ">>", "·", "—", "•"]
+            lines = []
+            for line in code.split("\n"):
+                # Check if line starts with any invalid character and remove it if so
+                clean_line = line.strip()
+                for char in invalid_chars:
+                    if clean_line.startswith(char):
+                        clean_line = clean_line[len(char):].strip()
+                lines.append(clean_line)
+            
+            # Rejoin lines and ensure they form valid Python code
+            code = "\n".join(lines)
             return code
         except Exception:
             raise HTTPException(status_code=500, detail="Failed to parse LLM response.")
